@@ -27,7 +27,7 @@ wss.on('connection',(ws,req)=>{const p={id:nextId++,ws,ok:false,room:'',x:0,y:0,
       send(p,{t:'welcome',id:p.id,motd:MOTD,ver:VER,cloud:a.save?{t:a.st||0,lv:a.slv||0}:null,players:[...players.values()].filter(q=>q.ok&&q!==p).map(pub)});
       bcast({t:'join',p:pub(p)},q=>q!==p);bcast({t:'chat',ch:'sys',m:name+' 上線了'},q=>q!==p);return}
     if(!p.ok)return;
-    if(m.t==='pos'){if(now-p.lastPos<60)return;p.lastPos=now;p.x=+m.x||0;p.y=+m.y||0;p.d=(m.d|0)&7;p.st=clean(m.st).slice(0,8);if(m.hp!=null)p.hp=+m.hp;
+    if(m.t==='pos'){if(now-p.lastPos<60&&(m.room==null||m.room===p.room))return;p.lastPos=now;p.x=+m.x||0;p.y=+m.y||0;p.d=(m.d|0)&7;p.st=clean(m.st).slice(0,8);if(m.hp!=null)p.hp=+m.hp;
       if(m.room!=null&&m.room!==p.room){p.room=clean(m.room).slice(0,30);bcast({t:'room',id:p.id,room:p.room,x:p.x,y:p.y},q=>q!==p)}
       const o={t:'pos',id:p.id,x:p.x,y:p.y,d:p.d,st:p.st};bcast(o,q=>q!==p&&q.room===p.room);return}
     if(m.t==='info'){p.lv=+m.lv||p.lv;p.ch=+m.ch||p.ch;p.cls=clean(m.cls).slice(0,10)||p.cls;if(m.look)p.look=clean(m.look).slice(0,400);bcast({t:'upd',p:pub(p)},q=>q!==p);if(p.party)partySync(p.party);return}
