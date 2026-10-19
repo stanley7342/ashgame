@@ -392,9 +392,14 @@ const nameIn=(()=>{const el=document.createElement('input')||{};if(!el.style)el.
 try{window.addEventListener('keydown',e=>{if(e.target===nameIn){if(e.key==='Enter')nameIn.blur();e.stopPropagation()}},true)}catch(_){}
 function placeNameIn(b){try{const r=document.getElementById('ui').getBoundingClientRect();if(r.width<10)return;const k=r.width/W;nameIn.style.display='block';nameIn.style.left=(r.left+b.x*k)+'px';nameIn.style.top=(r.top+b.y*k)+'px';nameIn.style.width=(b.w*k)+'px';nameIn.style.height=(b.h*k)+'px';nameIn.style.fontSize=Math.max(11,14*k)+'px'}catch(_){}}
 /* ================= online (MMO lobby / town / chat / party / cloud save) ================= */
-const NET={ws:null,on:false,conn:false,id:0,peers:new Map(),chat:[],party:null,invite:null,menu:null,insp:null,cloud:null,err:'',lastPos:0,lastSave:0,lastInfo:'',motd:'',url:'',pw:''};
-try{const c=JSON.parse(localStorage.getItem('rpgnet')||'{}');NET.url=c.url||'wss://ashgame-server.onrender.com'}catch(_){}
-let netOpen=false;const NETP={w:520,h:300,get x(){return W/2-260},get y(){return Math.max(6,H/2-150)}};
+const NET={ws:null,on:false,conn:false,id:0,peers:new Map(),chat:[],party:null,invite:null,menu:null,insp:null,cloud:null,err:'',lastPos:0,lastSave:0,lastInfo:'',motd:'',url:'wss://ashgame.onrender.com',pw:'',auto:false,retryAt:0,tries:0};const NETDEF='wss://ashgame.onrender.com';
+try{const c=JSON.parse(localStorage.getItem('rpgnet')||'{}');NET.url=(c.url&&!/ashgame-server\.onrender/.test(c.url))?c.url:NETDEF}catch(_){}
+function netPwMap(){try{return JSON.parse(localStorage.getItem('rpgnetpw')||'{}')}catch(_){return {}}}
+function netPwSet(n,pw){try{const m=netPwMap();m[n]=pw;localStorage.setItem('rpgnetpw',JSON.stringify(m))}catch(_){}}
+function netOff(){try{return localStorage.getItem('rpgnetoff')==='1'}catch(_){return false}}
+function netAuto(){if(NET.on||NET.conn||typeof WebSocket==='undefined'||!P||!P.name||netOff())return;let pw=netPwMap()[P.name];if(!pw){pw='';const A='abcdefghjkmnpqrstuvwxyz23456789';for(let i=0;i<14;i++)pw+=A[Math.floor(Math.random()*A.length)];netPwSet(P.name,pw)}
+  NET.auto=true;NET.pw=pw;try{netPwIn.value=pw;netUrlIn.value=NET.url||NETDEF}catch(_){}netConnect()}
+let netOpen=false;const NETP={w:560,get h(){return NET.on?Math.min(H-12,250+Math.max(1,NET.peers.size)*30):300},get x(){return W/2-280},get y(){return Math.max(6,H/2-this.h/2)}};
 function mkIn(id,type,ph){const el=document.createElement('input')||{};if(!el.style)el.style={};if(!el.blur)el.blur=()=>{};el.id=id;el.type=type;el.placeholder=ph;el.autocomplete='off';el.style.cssText='position:fixed;display:none;z-index:50;background:rgba(14,11,8,.95);color:#fff4dc;border:1px solid #c9a24b;border-radius:4px;padding:0 8px;font:600 13px sans-serif;outline:none;box-sizing:border-box';try{(document.querySelector('.stage')||document.body).appendChild(el)}catch(_){}return el}
 const netUrlIn=mkIn('netUrl','text','wss://你的伺服器網址'),netPwIn=mkIn('netPw','password','密碼（第一次登入會建立帳號）'),chatIn=mkIn('chatIn','text','輸入訊息，Enter 送出（/p 隊伍、/r 附近）');chatIn.maxLength=120;
 function placeIn(el,b){try{const r=document.getElementById('ui').getBoundingClientRect();if(r.width<10)return;const k=r.width/W;el.style.display='block';el.style.left=(r.left+b.x*k)+'px';el.style.top=(r.top+b.y*k)+'px';el.style.width=(b.w*k)+'px';el.style.height=(b.h*k)+'px';el.style.fontSize=Math.max(11,13*k)+'px'}catch(_){}}
@@ -420,16 +425,16 @@ function chatPush(ch,from,m){NET.chat.push({ch,from,m,t:frame});if(NET.chat.leng
 function chatSend(v){v=(v||'').trim();if(!v||!NET.on)return;let ch='w';if(v.startsWith('/p ')){ch='p';v=v.slice(3)}else if(v.startsWith('/r ')){ch='r';v=v.slice(3)}if(ch==='p'&&!NET.party){chatPush('sys','','你不在隊伍中');return}netSend({t:'chat',ch,m:v});if(P)P.say={m:v,t:300}}
 function netLook(){try{return dollKey()}catch(_){return 'M|base_fighter'}}
 function netConnect(){if(NET.conn)return;let url=(netUrlIn.value||NET.url||'').trim();const pw=netPwIn.value||NET.pw;if(!url){NET.err='請輸入伺服器網址';return}if(!/^wss?:\/\//.test(url))url=(url.startsWith('localhost')||url.startsWith('127.')?'ws://':'wss://')+url.replace(/^https?:\/\//,'');
-  if(!pw||pw.length<3){NET.err='密碼至少 3 個字';return}NET.url=url;NET.pw=pw;try{localStorage.setItem('rpgnet',JSON.stringify({url}))}catch(_){}NET.err='連線中…';NET.conn=true;
+  if(!pw||pw.length<3){NET.err='密碼至少 3 個字';return}NET.url=url;NET.pw=pw;try{localStorage.setItem('rpgnet',JSON.stringify({url}));localStorage.removeItem('rpgnetoff')}catch(_){}NET.err='連線中…';NET.conn=true;
   let ws;try{ws=new WebSocket(url)}catch(e){NET.err='網址錯誤';NET.conn=false;return}NET.ws=ws;
   ws.onopen=()=>{netSend({t:'hello',name:P.name,pw,cls:P.cls,lv:P.lv,ch:level,look:netLook(),room:netRoom()})};
-  ws.onclose=()=>{const was=NET.on;NET.on=false;NET.conn=false;NET.ws=null;NET.peers.clear();NET.party=null;NET.invite=null;netBtnUpd();if(was){chatPush('sys','','與伺服器的連線中斷了');log('線上：連線中斷','#e0645a')}else if(!NET.err||NET.err==='連線中…')NET.err='無法連線到伺服器'};
+  ws.onclose=()=>{const was=NET.on;NET.on=false;NET.conn=false;NET.ws=null;if(!NET.manual&&NET.tries<6){NET.tries++;NET.retryAt=frame+60*Math.min(60,5*NET.tries*NET.tries)}NET.manual=false;NET.peers.clear();NET.party=null;NET.invite=null;netBtnUpd();if(was){chatPush('sys','','與伺服器的連線中斷了');log('線上：連線中斷','#e0645a')}else if(!NET.err||NET.err==='連線中…')NET.err='無法連線到伺服器'};
   ws.onerror=()=>{};
   ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(_){return}netMsg(m)}}
-function netClose(){try{NET.ws&&NET.ws.close()}catch(_){}NET.on=false;NET.conn=false;netBtnUpd()}
+function netClose(){NET.manual=true;NET.retryAt=0;try{localStorage.setItem('rpgnetoff','1')}catch(_){}try{NET.ws&&NET.ws.close()}catch(_){}NET.on=false;NET.conn=false;netBtnUpd()}
 function netMsg(m){
-  if(m.t==='err'){NET.err=m.m;chatPush('sys','',m.m);if(!NET.on)try{NET.ws.close()}catch(_){};return}
-  if(m.t==='welcome'){NET.on=true;NET.conn=false;NET.id=m.id;NET.err='';NET.motd=m.motd;NET.cloud=m.cloud;NET.peers.clear();for(const p of m.players)netPeer(p);chatPush('sys','',m.motd);log('線上：已連線，線上 '+(m.players.length+1)+' 人。按 Enter 聊天','#7fd0ff');netBtnUpd();NET.lastSave=0;return}
+  if(m.t==='err'){NET.err=m.m;chatPush('sys','',m.m);if(!NET.on){NET.retryAt=0;NET.tries=99;if(NET.auto)log(/密碼/.test(m.m)?'線上：名稱「'+P.name+'」已被其他玩家使用，請按「線上」輸入該帳號密碼，或用新名稱建立角色':'線上：'+m.m,'#e0645a')}NET.auto=false;if(!NET.on)try{NET.ws.close()}catch(_){};return}
+  if(m.t==='welcome'){NET.on=true;NET.conn=false;NET.tries=0;NET.retryAt=0;if(P&&P.name&&NET.pw)netPwSet(P.name,NET.pw);NET.who=P&&P.name;NET.id=m.id;NET.err='';NET.motd=m.motd;NET.cloud=m.cloud;NET.peers.clear();for(const p of m.players)netPeer(p);chatPush('sys','',m.motd);log('線上：已連線，線上 '+(m.players.length+1)+' 人。按 Enter 聊天','#7fd0ff');netBtnUpd();NET.lastSave=0;return}
   if(m.t==='join'){netPeer(m.p);return}
   if(m.t==='leave'){NET.peers.delete(m.id);return}
   if(m.t==='upd'){netPeer(m.p);return}
@@ -444,7 +449,7 @@ function netMsg(m){
   if(m.t==='insp'){NET.insp={name:m.name,d:m.eq,t:900};return}}
 function netPeer(p){const q=NET.peers.get(p.id)||{rx:p.x,ry:p.y,walk:0};Object.assign(q,p);if(q.rx==null){q.rx=p.x;q.ry=p.y}NET.peers.set(p.id,q)}
 function netBtnUpd(){try{const b=document.getElementById('netbtn');if(b)b.textContent='線上：'+(NET.on?'已連線':'離線')}catch(_){}}
-function netTick(){if(!NET.on||!P)return;const now=frame;
+function netTick(){if(!NET.on&&!NET.conn&&P&&S==='play'){if(NET.autoName!==P.name){NET.autoName=P.name;NET.tries=0;netAuto()}else if(NET.retryAt&&frame>=NET.retryAt){NET.retryAt=0;if(!netOff())netConnect()}}if(NET.on&&P&&NET.who&&NET.who!==P.name){NET.manual=true;try{NET.ws.close()}catch(_){}NET.on=false;NET.autoName=null;return}if(!NET.on||!P)return;const now=frame;
   if(now-NET.lastPos>=6){NET.lastPos=now;netSend({t:'pos',x:+P.x.toFixed(2),y:+P.y.toFixed(2),d:lpcDir(P.aimS||0),st:P.st==='move'?'mv':P.st,hp:+(P.hp/P.maxHp).toFixed(2),room:netRoom()})}
   const info=P.lv+'|'+level+'|'+P.cls+'|'+netLook();if(info!==NET.lastInfo&&now%60===0){NET.lastInfo=info;netSend({t:'info',lv:P.lv,ch:level,cls:P.cls,look:netLook()})}
   if(now-NET.lastSave>3600&&S==='play'){NET.lastSave=now;try{saveGame();const r=localStorage.getItem(SLOT+P.name);if(r&&r.length<590000)netSend({t:'save',data:r,lv:P.lv})}catch(_){}}
@@ -461,7 +466,7 @@ function drawNetHud(){uiRects.net=[];if(!NET.on){hideIn(chatIn);return}
   const cx=166,cw=Math.max(240,W/2-129-30-166),open=chatIn.style.display==='block',L=NET.chat.filter(c=>open||frame-c.t<900).slice(-7);let y=H-214;
   if(open){ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(cx-4,y-L.length*15-6,cw+8,L.length*15+8)}
   L.slice().reverse().forEach((c,i)=>{const a=open?1:Math.min(1,(900-(frame-c.t))/120);ctx.globalAlpha=a;const col={w:'#fff4dc',p:'#8fe39a',r:'#7fd0ff',sys:'#e8c55a'}[c.ch]||'#fff4dc';const s=(c.ch==='p'?'[隊] ':c.ch==='r'?'[附近] ':'')+(c.from?c.from+'：':'')+c.m;ctx.font='600 11px '+SANS;let t=s;while(t.length>2&&ctx.measureText(t).width>cw)t=t.slice(0,-1);txt(t,cx,y-i*15,'600 11px '+SANS,col,'left',3);ctx.globalAlpha=1});
-  txt('線上 '+(NET.peers.size+1)+' 人　Enter 聊天',W-60,H-176,'600 10px '+SANS,'#7fd0ff','right',3);
+  {const r={x:W-200,y:H-188,w:142,h:16,k:'roster'};uiRects.net.push(r);txt('👥 線上 '+(NET.peers.size+1)+' 人（點此查看）',W-60,H-176,'600 10px '+SANS,inRect(r,mouse.sx,mouse.sy)?'#fff4dc':'#7fd0ff','right',3)}
   // invite
   if(NET.invite){const w=320,x=W/2-w/2,y=140;ctx.fillStyle='rgba(14,11,8,.95)';ctx.fillRect(x,y,w,64);ctx.strokeStyle='#8fe39a';ctx.strokeRect(x+.5,y+.5,w-1,63);txt(NET.invite.name+' 邀請你加入隊伍',W/2,y+22,'800 14px '+SANS,'#8fe39a','center');
     const a={x:W/2-110,y:y+32,w:100,h:24,k:'acc'},b={x:W/2+10,y:y+32,w:100,h:24,k:'dec'};for(const r of [a,b]){uiRects.net.push(r);ctx.fillStyle=inRect(r,mouse.sx,mouse.sy)?'#4a6a30':'#2a241b';ctx.fillRect(r.x,r.y,r.w,r.h);txt(r.k==='acc'?'接受':'拒絕',r.x+r.w/2,r.y+17,'700 12px '+SANS,'#fff4dc','center')}}
@@ -478,7 +483,7 @@ function drawNetHud(){uiRects.net=[];if(!NET.on){hideIn(chatIn);return}
   if(NET.insp&&NET.insp.d){const d=NET.insp.d,x=W/2-150,y=200,keys=Object.keys(d.eq||{});const h=50+keys.length*16;ctx.fillStyle='rgba(14,11,8,.95)';ctx.fillRect(x,y,300,h);ctx.strokeStyle='#e8c55a';ctx.strokeRect(x+.5,y+.5,299,h-1);
     txt(NET.insp.name+'　'+(CLS[d.cls]?CLS[d.cls].name:'')+' Lv'+d.lv+'　HP '+d.hp+'　AC '+d.ac,x+150,y+20,'800 12px '+SANS,'#e8c55a','center');keys.forEach((k,i)=>{const it=d.eq[k];txt(it[0],x+16,y+42+i*16,'600 11px '+SANS,it[2]?SETC:(RAR[it[1]]||RAR[0]).c,'left')});const r={x:x+270,y:y+4,w:24,h:20,k:'xi'};uiRects.net.push(r);txt('✕',r.x+12,r.y+15,'800 12px '+SANS,'#c9a08a','center')}}
 function netClick(){if(!NET.on||!mouse.just)return false;const r=(uiRects.net||[]).find(r=>inRect(r,mouse.sx,mouse.sy));
-  if(r){if(r.k==='acc'){netSend({t:'party',a:'accept',from:NET.invite.from});NET.invite=null}else if(r.k==='dec')NET.invite=null;else if(r.k==='inv'){netSend({t:'party',a:'invite',to:r.id});NET.menu=null}else if(r.k==='insp'){netSend({t:'insp',who:r.id});NET.menu=null}else if(r.k==='leave')netSend({t:'party',a:'leave'});else if(r.k==='xi')NET.insp=null;else if(r.k==='fly'){NET.menu=null;netFly(r.id);return true}else if(r.k==='back'){netBack();return true}sfx('ui');return true}
+  if(r){if(r.k==='acc'){netSend({t:'party',a:'accept',from:NET.invite.from});NET.invite=null}else if(r.k==='dec')NET.invite=null;else if(r.k==='inv'){netSend({t:'party',a:'invite',to:r.id});NET.menu=null}else if(r.k==='insp'){netSend({t:'insp',who:r.id});NET.menu=null}else if(r.k==='leave')netSend({t:'party',a:'leave'});else if(r.k==='xi')NET.insp=null;else if(r.k==='fly'){NET.menu=null;netFly(r.id);return true}else if(r.k==='back'){netBack();return true}else if(r.k==='roster'){netOpen=true;return true}sfx('ui');return true}
   if(NET.menu){NET.menu=null;return true}
   if(isTown()){const room=netRoom();for(const q of NET.peers.values()){if(q.room===room&&q.sr&&inRect(q.sr,mouse.sx,mouse.sy)){NET.menu={id:q.id,x:mouse.sx+10,y:mouse.sy-20};sfx('ui');return true}}}
   return false}
@@ -487,13 +492,23 @@ function drawNetPanel(){const B=NETP;uiRects.np=[];ctx.fillStyle='rgba(0,0,0,.55
   if(!NET.on){txt('伺服器',B.x+20,B.y+86,'700 12px '+SANS,'#e8c55a');placeIn(netUrlIn,{x:B.x+90,y:B.y+68,w:B.w-110,h:28});if(!netUrlIn.value&&NET.url)netUrlIn.value=NET.url;
     txt('密碼',B.x+20,B.y+126,'700 12px '+SANS,'#e8c55a');placeIn(netPwIn,{x:B.x+90,y:B.y+108,w:B.w-110,h:28});
     const b={x:B.x+B.w/2-70,y:B.y+156,w:140,h:34,k:'go'};uiRects.np.push(b);ctx.fillStyle=inRect(b,mouse.sx,mouse.sy)?'#4a6a30':'#3a5228';ctx.fillRect(b.x,b.y,b.w,b.h);txt(NET.conn?'連線中…':'連線',b.x+70,b.y+22,'800 14px '+SANS,'#fff4dc','center');
-    if(NET.err)txt(NET.err,B.x+B.w/2,B.y+212,'600 12px '+SANS,'#ff8a6a','center');txt('單機遊玩不受影響；連線後可以在營地看到其他玩家、聊天、組隊，並自動上傳雲端存檔',B.x+B.w/2,B.y+B.h-40,'500 11px '+SANS,'#9a917e','center');txt('官方伺服器：wss://ashgame-server.onrender.com（閒置後第一次連線約需 30～60 秒喚醒）',B.x+B.w/2,B.y+B.h-24,'500 10px '+SANS,'#7f7766','center')}
+    if(NET.err)txt(NET.err,B.x+B.w/2,B.y+212,'600 12px '+SANS,'#ff8a6a','center');txt('單機遊玩不受影響；連線後可以在營地看到其他玩家、聊天、組隊，並自動上傳雲端存檔',B.x+B.w/2,B.y+B.h-40,'500 11px '+SANS,'#9a917e','center');txt('官方伺服器：wss://ashgame.onrender.com（閒置後第一次連線約需 30～60 秒喚醒）',B.x+B.w/2,B.y+B.h-24,'500 10px '+SANS,'#7f7766','center')}
   else{hideIn(netUrlIn);hideIn(netPwIn);txt('已連線：'+NET.url,B.x+20,B.y+84,'600 12px '+SANS,'#8fe39a');txt('線上 '+(NET.peers.size+1)+' 人'+(NET.party?'　隊伍 '+NET.party.mem.length+' 人':''),B.x+20,B.y+106,'600 12px '+SANS,'#e9e2d0');
     txt(NET.cloud?'雲端存檔：'+new Date(NET.cloud.t).toLocaleString()+'（Lv'+NET.cloud.lv+'）':'雲端還沒有存檔',B.x+20,B.y+128,'500 11px '+SANS,'#b9ae98');
-    [['up','上傳存檔'],['down','載入雲端存檔'],['off','離線']].forEach(([k,n],i)=>{const b={x:B.x+20+i*165,y:B.y+156,w:150,h:32,k};uiRects.np.push(b);ctx.fillStyle=inRect(b,mouse.sx,mouse.sy)?'#4a4030':'#2a241b';ctx.fillRect(b.x,b.y,b.w,b.h);txt(n,b.x+75,b.y+21,'800 12px '+SANS,k==='off'?'#e0645a':'#fff4dc','center')})}
+    [['up','上傳存檔'],['down','載入雲端存檔'],['off','離線']].forEach(([k,n],i)=>{const b={x:B.x+20+i*165,y:B.y+156,w:150,h:32,k};uiRects.np.push(b);ctx.fillStyle=inRect(b,mouse.sx,mouse.sy)?'#4a4030':'#2a241b';ctx.fillRect(b.x,b.y,b.w,b.h);txt(n,b.x+75,b.y+21,'800 12px '+SANS,k==='off'?'#e0645a':'#fff4dc','center')});
+    let y=B.y+206;txt('線上玩家',B.x+20,y+8,'800 12px '+SANS,'#e8c55a');y+=18;const L=[...NET.peers.values()].filter(q=>q.name);
+    if(!L.length)txt('目前沒有其他玩家在線上（對方也要按「線上」連到同一個伺服器）',B.x+20,y+16,'500 11px '+SANS,'#9a917e');
+    const full=NET.party&&NET.party.mem.length>=4;
+    for(const q of L){if(y+28>B.y+B.h-8)break;const inP=NET.party&&q.party===NET.party.id,same=q.room===netRoom();ctx.fillStyle='rgba(255,255,255,.04)';ctx.fillRect(B.x+16,y,B.w-32,26);
+      txt((inP?'★ ':'')+q.name,B.x+24,y+17,'700 12px '+SANS,inP?'#8fe39a':'#7fd0ff','left');txt((CLS[q.cls]?CLS[q.cls].name:'')+' Lv'+(q.lv||1),B.x+150,y+17,'600 11px '+SANS,'#e9e2d0','left');
+      txt(netWhere(q.room)+(same?'（同地圖）':''),B.x+232,y+17,'500 11px '+SANS,same?'#8fe39a':'#b9ae98','left');
+      const bt=[];if(!inP&&!full&&!q.party)bt.push(['pinv','邀請組隊']);if(inP&&!same)bt.push(['pfly','✈ 傳送']);
+      bt.forEach(([k,n],i)=>{const b={x:B.x+B.w-24-(i+1)*84,y:y+3,w:78,h:20,k,id:q.id};uiRects.np.push(b);ctx.fillStyle=inRect(b,mouse.sx,mouse.sy)?'#3a5a7a':'#22303e';ctx.fillRect(b.x,b.y,b.w,b.h);txt(n,b.x+39,b.y+14,'700 11px '+SANS,'#dff2ff','center')});
+      if(q.party&&!inP)txt('已在其他隊伍',B.x+B.w-30,y+17,'500 10px '+SANS,'#7f7766','right');y+=30}}
   txt('Esc 關閉',B.x+B.w-20,B.y+B.h-14,'500 11px '+SANS,'#9a917e','right')}
 function updateNetPanel(){if(pressed.esc){netOpen=false;hideIn(netUrlIn);hideIn(netPwIn);return}if(!mouse.just)return;const r=(uiRects.np||[]).find(r=>inRect(r,mouse.sx,mouse.sy));if(!r){if(!inRect(NETP,mouse.sx,mouse.sy)){netOpen=false;hideIn(netUrlIn);hideIn(netPwIn)}return}
-  sfx('ui');if(r.k==='go')netConnect();else if(r.k==='off')netClose();else if(r.k==='up'){try{saveGame();const s=localStorage.getItem(SLOT+P.name);if(s)netSend({t:'save',data:s,lv:P.lv});log('線上：已上傳存檔','#7fd0ff')}catch(_){}}else if(r.k==='down')netSend({t:'load'})}
+  sfx('ui');if(r.k==='go')netConnect();else if(r.k==='off')netClose();else if(r.k==='up'){try{saveGame();const s=localStorage.getItem(SLOT+P.name);if(s)netSend({t:'save',data:s,lv:P.lv});log('線上：已上傳存檔','#7fd0ff')}catch(_){}}else if(r.k==='down')netSend({t:'load'});else if(r.k==='pinv')netSend({t:'party',a:'invite',to:r.id});else if(r.k==='pfly'){netOpen=false;netFly(r.id)}}
+function netWhere(r){if(!r)return '—';const a=r.slice(1).split('-'),c=+a[0]||0,l=+a[1]||1,cy=c?'（'+(c+1)+' 週目）':'';if(r[0]==='R')return '無盡試煉 第 '+l+' 層';const ch=LEVELS[l-1]?LEVELS[l-1].name:'';if(r[0]==='T')return '第 '+l+' 章 城鎮'+cy;return '第 '+l+' 章 '+ch+' 第 '+(+a[2]||1)+' 關'+cy}
 
 try{const nb=document.getElementById('netbtn');nb&&nb.addEventListener&&nb.addEventListener('click',e=>{try{e.currentTarget.blur()}catch(_){}if(S==='play'||S==='dead'){netOpen=!netOpen;if(!netOpen){hideIn(netUrlIn);hideIn(netPwIn)}}else log('請先選擇或建立角色，再進入線上模式','#9a917e')})}catch(_){}
 const cv=document.getElementById('game');let ctx=cv.getContext('2d');const mainCtx=ctx;
