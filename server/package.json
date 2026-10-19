@@ -1,0 +1,10 @@
+{
+  "name": "ashgame-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "蒼燼紀行 線上伺服器（大廳、營地、聊天、組隊、雲端存檔）",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "8.18.0" }
+}
