@@ -59,7 +59,7 @@ kbd{font-family:var(--body);font-size:12px;background:var(--panel);border:1px so
 <div class="wrap">
   <header>
     <h1>蒼燼紀行<span>d20 斜角動作 RPG · 原型 v0.5</span></h1>
-    <div class="btns"><button id="v3d" type="button" style="display:none">3D</button><button id="spd" type="button">速度：3x</button><button id="aibtn" type="button" aria-pressed="true">AI 自動：開</button><button id="restart" type="button">重新開始</button><button id="quality" type="button">畫質：流暢</button><button id="fs" type="button">全螢幕</button><button id="mus" type="button" aria-pressed="false">音樂：關</button><button id="snd" type="button" aria-pressed="false">音效：關</button></div>
+    <div class="btns"><button id="v3d" type="button" style="display:none">3D</button><button id="spd" type="button">速度：3x</button><button id="aibtn" type="button" aria-pressed="true">AI 自動：開</button><button id="restart" type="button">重新開始</button><button id="quality" type="button">畫質：流暢</button><button id="fs" type="button">全螢幕</button><button id="mus" type="button" aria-pressed="false">音樂：關</button><button id="snd" type="button" aria-pressed="false">音效：關</button><button id="netbtn" type="button">線上：離線</button></div>
   </header>
 
   <div class="stage"><div class="fsbar" id="fsbar"><button type="button" data-p="spd">速度</button><button type="button" data-p="aibtn">AI</button><button type="button" data-p="quality">畫質</button><button type="button" data-p="mus">音樂</button><button type="button" data-p="snd">音效</button><button type="button" data-p="fs">離開全螢幕</button></div><div class="fshint" id="fshint">全螢幕：按 F 或 Esc 離開・P 開關 AI・L 戰鬥訊息</div><div class="view"><canvas id="game" width="960" height="540" aria-label="遊戲畫面"></canvas><canvas id="ui" width="960" height="540" aria-hidden="true"></canvas></div></div>
@@ -391,6 +391,98 @@ function itemKey(it){if(ITEM_IDX[it.name]!=null)return it.name;if(it.base&&ITEM_
 const nameIn=(()=>{const el=document.createElement('input')||{};if(!el.style)el.style={};if(!el.blur)el.blur=()=>{};el.id='nameIn';el.type='text';el.maxLength=12;el.placeholder='輸入名稱（存檔用）';el.autocomplete='off';el.style.cssText='position:fixed;display:none;z-index:50;background:rgba(14,11,8,.95);color:#fff4dc;border:1px solid #c9a24b;border-radius:4px;padding:0 8px;font:600 14px sans-serif;outline:none;box-sizing:border-box';try{(document.querySelector('.stage')||document.body).appendChild(el)}catch(_){}return el})();
 try{window.addEventListener('keydown',e=>{if(e.target===nameIn){if(e.key==='Enter')nameIn.blur();e.stopPropagation()}},true)}catch(_){}
 function placeNameIn(b){try{const r=document.getElementById('ui').getBoundingClientRect();if(r.width<10)return;const k=r.width/W;nameIn.style.display='block';nameIn.style.left=(r.left+b.x*k)+'px';nameIn.style.top=(r.top+b.y*k)+'px';nameIn.style.width=(b.w*k)+'px';nameIn.style.height=(b.h*k)+'px';nameIn.style.fontSize=Math.max(11,14*k)+'px'}catch(_){}}
+/* ================= online (MMO lobby / town / chat / party / cloud save) ================= */
+const NET={ws:null,on:false,conn:false,id:0,peers:new Map(),chat:[],party:null,invite:null,menu:null,insp:null,cloud:null,err:'',lastPos:0,lastSave:0,lastInfo:'',motd:'',url:'',pw:''};
+try{const c=JSON.parse(localStorage.getItem('rpgnet')||'{}');NET.url=c.url||''}catch(_){}
+let netOpen=false;const NETP={w:520,h:300,get x(){return W/2-260},get y(){return Math.max(6,H/2-150)}};
+function mkIn(id,type,ph){const el=document.createElement('input')||{};if(!el.style)el.style={};if(!el.blur)el.blur=()=>{};el.id=id;el.type=type;el.placeholder=ph;el.autocomplete='off';el.style.cssText='position:fixed;display:none;z-index:50;background:rgba(14,11,8,.95);color:#fff4dc;border:1px solid #c9a24b;border-radius:4px;padding:0 8px;font:600 13px sans-serif;outline:none;box-sizing:border-box';try{(document.querySelector('.stage')||document.body).appendChild(el)}catch(_){}return el}
+const netUrlIn=mkIn('netUrl','text','wss://你的伺服器網址'),netPwIn=mkIn('netPw','password','密碼（第一次登入會建立帳號）'),chatIn=mkIn('chatIn','text','輸入訊息，Enter 送出（/p 隊伍、/r 附近）');chatIn.maxLength=120;
+function placeIn(el,b){try{const r=document.getElementById('ui').getBoundingClientRect();if(r.width<10)return;const k=r.width/W;el.style.display='block';el.style.left=(r.left+b.x*k)+'px';el.style.top=(r.top+b.y*k)+'px';el.style.width=(b.w*k)+'px';el.style.height=(b.h*k)+'px';el.style.fontSize=Math.max(11,13*k)+'px'}catch(_){}}
+function hideIn(el){if(el.style&&el.style.display!=='none')el.style.display='none'}
+try{window.addEventListener('keydown',e=>{const t=e.target;if(t===netUrlIn||t===netPwIn){if(e.key==='Enter'){t.blur();netConnect()}e.stopPropagation();return}
+  if(t===chatIn){if(e.key==='Enter'){chatSend(chatIn.value);chatIn.value='';chatIn.blur();hideIn(chatIn)}else if(e.key==='Escape'){chatIn.value='';chatIn.blur();hideIn(chatIn)}e.stopPropagation();return}
+  if(e.key==='Enter'&&NET.on&&S==='play'&&!story){e.preventDefault();e.stopPropagation();chatOpen()}},true)}catch(_){}
+function chatOpen(){placeIn(chatIn,{x:166,y:H-206,w:Math.max(240,W/2-129-30-166),h:26});try{chatIn.focus()}catch(_){}}
+function netRoom(){return isTown()?'T'+cycle+'-'+level:'A'+cycle+'-'+level+'-'+stage}
+function netSend(o){try{if(NET.ws&&NET.ws.readyState===1)NET.ws.send(JSON.stringify(o))}catch(_){}}
+function chatPush(ch,from,m){NET.chat.push({ch,from,m,t:frame});if(NET.chat.length>60)NET.chat.shift();if(from){for(const q of NET.peers.values())if(q.name===from){q.say={m,t:300}}}}
+function chatSend(v){v=(v||'').trim();if(!v||!NET.on)return;let ch='w';if(v.startsWith('/p ')){ch='p';v=v.slice(3)}else if(v.startsWith('/r ')){ch='r';v=v.slice(3)}if(ch==='p'&&!NET.party){chatPush('sys','','你不在隊伍中');return}netSend({t:'chat',ch,m:v});if(P)P.say={m:v,t:300}}
+function netLook(){try{return dollKey()}catch(_){return 'M|base_fighter'}}
+function netConnect(){if(NET.conn)return;let url=(netUrlIn.value||NET.url||'').trim();const pw=netPwIn.value||NET.pw;if(!url){NET.err='請輸入伺服器網址';return}if(!/^wss?:\/\//.test(url))url=(url.startsWith('localhost')||url.startsWith('127.')?'ws://':'wss://')+url.replace(/^https?:\/\//,'');
+  if(!pw||pw.length<3){NET.err='密碼至少 3 個字';return}NET.url=url;NET.pw=pw;try{localStorage.setItem('rpgnet',JSON.stringify({url}))}catch(_){}NET.err='連線中…';NET.conn=true;
+  let ws;try{ws=new WebSocket(url)}catch(e){NET.err='網址錯誤';NET.conn=false;return}NET.ws=ws;
+  ws.onopen=()=>{netSend({t:'hello',name:P.name,pw,cls:P.cls,lv:P.lv,ch:level,look:netLook(),room:netRoom()})};
+  ws.onclose=()=>{const was=NET.on;NET.on=false;NET.conn=false;NET.ws=null;NET.peers.clear();NET.party=null;NET.invite=null;netBtnUpd();if(was){chatPush('sys','','與伺服器的連線中斷了');log('線上：連線中斷','#e0645a')}else if(!NET.err||NET.err==='連線中…')NET.err='無法連線到伺服器'};
+  ws.onerror=()=>{};
+  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(_){return}netMsg(m)}}
+function netClose(){try{NET.ws&&NET.ws.close()}catch(_){}NET.on=false;NET.conn=false;netBtnUpd()}
+function netMsg(m){
+  if(m.t==='err'){NET.err=m.m;chatPush('sys','',m.m);if(!NET.on)try{NET.ws.close()}catch(_){};return}
+  if(m.t==='welcome'){NET.on=true;NET.conn=false;NET.id=m.id;NET.err='';NET.motd=m.motd;NET.cloud=m.cloud;NET.peers.clear();for(const p of m.players)netPeer(p);chatPush('sys','',m.motd);log('線上：已連線，線上 '+(m.players.length+1)+' 人。按 Enter 聊天','#7fd0ff');netBtnUpd();NET.lastSave=0;return}
+  if(m.t==='join'){netPeer(m.p);return}
+  if(m.t==='leave'){NET.peers.delete(m.id);return}
+  if(m.t==='upd'){netPeer(m.p);return}
+  if(m.t==='room'){const q=NET.peers.get(m.id);if(q){q.room=m.room;q.x=q.rx=m.x;q.y=q.ry=m.y}return}
+  if(m.t==='pos'){const q=NET.peers.get(m.id);if(q){q.x=m.x;q.y=m.y;q.d=m.d;q.st=m.st}return}
+  if(m.t==='pp'){for(const id of m.ids){const q=NET.peers.get(id);if(q)q.party=m.party}return}
+  if(m.t==='chat'){chatPush(m.ch,m.from||'',m.m);if(m.ch!=='sys'&&soundOn)sfx('ui');return}
+  if(m.t==='party'){if(m.a==='invite'){NET.invite={from:m.from,name:m.name,t:1200};sfx('ui')}else if(m.a==='info'){NET.party=m.party}else if(m.a==='go')chatPush('p','系統',m.from+' 前往 '+m.ch+' 章');return}
+  if(m.t==='saved'){NET.cloud={t:m.at,lv:P.lv};return}
+  if(m.t==='load'){if(m.data){try{localStorage.setItem(SLOT+P.name,m.data);slotTouch(P.name);loadGame(P.name);log('線上：已載入雲端存檔','#7fd0ff')}catch(_){}}else log('雲端沒有存檔','#9a917e');return}
+  if(m.t==='insp_req'){const eq={};for(const k in (P.eq||{})){const it=P.eq[k];if(it)eq[k]=[it.name,it.rar||0,!!it.setId]}netSend({t:'insp_res',to:m.from,eq:{eq,lv:P.lv,cls:P.cls,hp:P.maxHp,ac:P.s?P.s.ac:0}});return}
+  if(m.t==='insp'){NET.insp={name:m.name,d:m.eq,t:900};return}}
+function netPeer(p){const q=NET.peers.get(p.id)||{rx:p.x,ry:p.y,walk:0};Object.assign(q,p);if(q.rx==null){q.rx=p.x;q.ry=p.y}NET.peers.set(p.id,q)}
+function netBtnUpd(){try{const b=document.getElementById('netbtn');if(b)b.textContent='線上：'+(NET.on?'已連線':'離線')}catch(_){}}
+function netTick(){if(!NET.on||!P)return;const now=frame;
+  if(now-NET.lastPos>=6){NET.lastPos=now;netSend({t:'pos',x:+P.x.toFixed(2),y:+P.y.toFixed(2),d:lpcDir(P.aimS||0),st:P.st==='move'?'mv':P.st,hp:+(P.hp/P.maxHp).toFixed(2),room:netRoom()})}
+  const info=P.lv+'|'+level+'|'+P.cls+'|'+netLook();if(info!==NET.lastInfo&&now%60===0){NET.lastInfo=info;netSend({t:'info',lv:P.lv,ch:level,cls:P.cls,look:netLook()})}
+  if(now-NET.lastSave>3600&&S==='play'){NET.lastSave=now;try{saveGame();const r=localStorage.getItem(SLOT+P.name);if(r&&r.length<590000)netSend({t:'save',data:r,lv:P.lv})}catch(_){}}
+  for(const q of NET.peers.values()){const dx=q.x-q.rx,dy=q.y-q.ry,d=Math.hypot(dx,dy);if(d>6){q.rx=q.x;q.ry=q.y}else{q.rx+=dx*.25;q.ry+=dy*.25}q.mv=d>.03;if(q.mv)q.walk+=.3;if(q.say&&--q.say.t<=0)q.say=null}
+  if(P.say&&--P.say.t<=0)P.say=null;if(NET.invite&&--NET.invite.t<=0)NET.invite=null;if(NET.insp&&--NET.insp.t<=0)NET.insp=null}
+function drawPeer(q){const sx=sxOf(q.rx,q.ry),sy=syOf(q.rx,q.ry);if(sx<-60||sx>W+60||sy<-90||sy>H+40)return;shadow(sx,sy,12);const d=composeDoll(q.look||'M|base_fighter');
+  if(d){const m=d.meta.walk,fi=q.mv?1+Math.floor(q.walk)%8:0,sc=LPC_SC*ZK,sm=ctx.imageSmoothingEnabled;ctx.imageSmoothingEnabled=false;ctx.drawImage(d.cv,fi*64,m.y+(q.d||2)*64,64,64,Math.round(sx-32*sc),Math.round(sy-60*sc),Math.round(64*sc),Math.round(64*sc));ctx.imageSmoothingEnabled=sm}
+  q.sr={x:sx-20,y:sy-80*ZK,w:40,h:84*ZK}}
+function drawPeerLabels(){if(!NET.on)return;const room=netRoom();for(const q of NET.peers.values()){if(q.room!==room||!q.sr)continue;const sx=q.sr.x+20,sy=q.sr.y;const pc=NET.party&&q.party&&q.party===NET.party.id;
+    txt(q.name+' Lv'+q.lv,sx,sy-2,'700 11px '+SANS,pc?'#8fe39a':'#7fd0ff','center',3);if(q.say){ctx.font='600 12px '+SANS;const w=Math.min(220,ctx.measureText(q.say.m).width+16);ctx.fillStyle='rgba(12,10,8,.88)';ctx.fillRect(sx-w/2,sy-34,w,22);ctx.strokeStyle='#7fd0ff';ctx.strokeRect(sx-w/2+.5,sy-33.5,w-1,21);let t=q.say.m;while(t.length>2&&ctx.measureText(t).width>w-12)t=t.slice(0,-1);txt(t,sx,sy-18,'600 12px '+SANS,'#fff4dc','center')}}
+  if(P&&P.say){const sx=sxOf(P.x,P.y),sy=syOf(P.x,P.y)-88*ZK;ctx.font='600 12px '+SANS;const w=Math.min(220,ctx.measureText(P.say.m).width+16);ctx.fillStyle='rgba(12,10,8,.88)';ctx.fillRect(sx-w/2,sy-24,w,22);ctx.strokeStyle='#e8c55a';ctx.strokeRect(sx-w/2+.5,sy-23.5,w-1,21);let t=P.say.m;while(t.length>2&&ctx.measureText(t).width>w-12)t=t.slice(0,-1);txt(t,sx,sy-8,'600 12px '+SANS,'#fff4dc','center')}}
+function drawNetHud(){uiRects.net=[];if(!NET.on){hideIn(chatIn);return}
+  // chat box
+  const cx=166,cw=Math.max(240,W/2-129-30-166),open=chatIn.style.display==='block',L=NET.chat.filter(c=>open||frame-c.t<900).slice(-7);let y=H-214;
+  if(open){ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(cx-4,y-L.length*15-6,cw+8,L.length*15+8)}
+  L.slice().reverse().forEach((c,i)=>{const a=open?1:Math.min(1,(900-(frame-c.t))/120);ctx.globalAlpha=a;const col={w:'#fff4dc',p:'#8fe39a',r:'#7fd0ff',sys:'#e8c55a'}[c.ch]||'#fff4dc';const s=(c.ch==='p'?'[隊] ':c.ch==='r'?'[附近] ':'')+(c.from?c.from+'：':'')+c.m;ctx.font='600 11px '+SANS;let t=s;while(t.length>2&&ctx.measureText(t).width>cw)t=t.slice(0,-1);txt(t,cx,y-i*15,'600 11px '+SANS,col,'left',3);ctx.globalAlpha=1});
+  txt('線上 '+(NET.peers.size+1)+' 人　Enter 聊天',W-60,H-176,'600 10px '+SANS,'#7fd0ff','right',3);
+  // invite
+  if(NET.invite){const w=320,x=W/2-w/2,y=140;ctx.fillStyle='rgba(14,11,8,.95)';ctx.fillRect(x,y,w,64);ctx.strokeStyle='#8fe39a';ctx.strokeRect(x+.5,y+.5,w-1,63);txt(NET.invite.name+' 邀請你加入隊伍',W/2,y+22,'800 14px '+SANS,'#8fe39a','center');
+    const a={x:W/2-110,y:y+32,w:100,h:24,k:'acc'},b={x:W/2+10,y:y+32,w:100,h:24,k:'dec'};for(const r of [a,b]){uiRects.net.push(r);ctx.fillStyle=inRect(r,mouse.sx,mouse.sy)?'#4a6a30':'#2a241b';ctx.fillRect(r.x,r.y,r.w,r.h);txt(r.k==='acc'?'接受':'拒絕',r.x+r.w/2,r.y+17,'700 12px '+SANS,'#fff4dc','center')}}
+  // peer menu
+  if(NET.menu){const q=NET.peers.get(NET.menu.id);if(!q){NET.menu=null}else{const x=Math.min(NET.menu.x,W-150),y=NET.menu.y;ctx.fillStyle='rgba(14,11,8,.95)';ctx.fillRect(x,y,140,96);ctx.strokeStyle='#7fd0ff';ctx.strokeRect(x+.5,y+.5,139,95);txt(q.name+'（'+(CLS[q.cls]?CLS[q.cls].name:'')+' Lv'+q.lv+'）',x+70,y+18,'700 11px '+SANS,'#7fd0ff','center');
+    [['inv','邀請組隊'],['insp','查看裝備'],['wh','私訊（隊伍頻道）']].slice(0,2).forEach(([k,n],i)=>{const r={x:x+8,y:y+28+i*30,w:124,h:26,k,id:q.id};uiRects.net.push(r);ctx.fillStyle=inRect(r,mouse.sx,mouse.sy)?'#3a4a5a':'#2a241b';ctx.fillRect(r.x,r.y,r.w,r.h);txt(n,r.x+62,r.y+18,'700 12px '+SANS,'#fff4dc','center')})}}
+  // party list
+  if(NET.party){let y=Math.max(260,(uiRects.pf||[]).reduce((a,r)=>Math.max(a,r.y+r.h),0)+12);txt('隊伍（'+NET.party.mem.length+'/4）',14,y+10,'800 11px '+SANS,'#8fe39a','left',3);y+=16;
+    for(const mm of NET.party.mem){if(mm.id===NET.id)continue;txt((NET.party.leader===mm.id?'★ ':'')+mm.name+'　Lv'+mm.lv+'　'+mm.ch+' 章',14,y+10,'600 11px '+SANS,'#e9e2d0','left',3);y+=15}
+    const r={x:12,y:y+2,w:80,h:20,k:'leave'};uiRects.net.push(r);ctx.fillStyle=inRect(r,mouse.sx,mouse.sy)?'#5a2a24':'#2a241b';ctx.fillRect(r.x,r.y,r.w,r.h);txt('離開隊伍',r.x+40,r.y+14,'700 11px '+SANS,'#e0645a','center')}
+  // inspect
+  if(NET.insp&&NET.insp.d){const d=NET.insp.d,x=W/2-150,y=200,keys=Object.keys(d.eq||{});const h=50+keys.length*16;ctx.fillStyle='rgba(14,11,8,.95)';ctx.fillRect(x,y,300,h);ctx.strokeStyle='#e8c55a';ctx.strokeRect(x+.5,y+.5,299,h-1);
+    txt(NET.insp.name+'　'+(CLS[d.cls]?CLS[d.cls].name:'')+' Lv'+d.lv+'　HP '+d.hp+'　AC '+d.ac,x+150,y+20,'800 12px '+SANS,'#e8c55a','center');keys.forEach((k,i)=>{const it=d.eq[k];txt(it[0],x+16,y+42+i*16,'600 11px '+SANS,it[2]?SETC:(RAR[it[1]]||RAR[0]).c,'left')});const r={x:x+270,y:y+4,w:24,h:20,k:'xi'};uiRects.net.push(r);txt('✕',r.x+12,r.y+15,'800 12px '+SANS,'#c9a08a','center')}}
+function netClick(){if(!NET.on||!mouse.just)return false;const r=(uiRects.net||[]).find(r=>inRect(r,mouse.sx,mouse.sy));
+  if(r){if(r.k==='acc'){netSend({t:'party',a:'accept',from:NET.invite.from});NET.invite=null}else if(r.k==='dec')NET.invite=null;else if(r.k==='inv'){netSend({t:'party',a:'invite',to:r.id});NET.menu=null}else if(r.k==='insp'){netSend({t:'insp',who:r.id});NET.menu=null}else if(r.k==='leave')netSend({t:'party',a:'leave'});else if(r.k==='xi')NET.insp=null;sfx('ui');return true}
+  if(NET.menu){NET.menu=null;return true}
+  if(isTown()){const room=netRoom();for(const q of NET.peers.values()){if(q.room===room&&q.sr&&inRect(q.sr,mouse.sx,mouse.sy)){NET.menu={id:q.id,x:mouse.sx+10,y:mouse.sy-20};sfx('ui');return true}}}
+  return false}
+function drawNetPanel(){const B=NETP;uiRects.np=[];ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,0,W,H);panelBox(B.x,B.y,B.w,B.h,'線上模式');
+  txt('角色：'+(P?P.name:'')+'（名稱就是帳號，第一次登入會用這組密碼建立帳號）',B.x+20,B.y+52,'500 11px '+SANS,'#9a917e');
+  if(!NET.on){txt('伺服器',B.x+20,B.y+86,'700 12px '+SANS,'#e8c55a');placeIn(netUrlIn,{x:B.x+90,y:B.y+68,w:B.w-110,h:28});if(!netUrlIn.value&&NET.url)netUrlIn.value=NET.url;
+    txt('密碼',B.x+20,B.y+126,'700 12px '+SANS,'#e8c55a');placeIn(netPwIn,{x:B.x+90,y:B.y+108,w:B.w-110,h:28});
+    const b={x:B.x+B.w/2-70,y:B.y+156,w:140,h:34,k:'go'};uiRects.np.push(b);ctx.fillStyle=inRect(b,mouse.sx,mouse.sy)?'#4a6a30':'#3a5228';ctx.fillRect(b.x,b.y,b.w,b.h);txt(NET.conn?'連線中…':'連線',b.x+70,b.y+22,'800 14px '+SANS,'#fff4dc','center');
+    if(NET.err)txt(NET.err,B.x+B.w/2,B.y+212,'600 12px '+SANS,'#ff8a6a','center');txt('單機遊玩不受影響；連線後可以在營地看到其他玩家、聊天、組隊，並自動上傳雲端存檔',B.x+B.w/2,B.y+B.h-40,'500 11px '+SANS,'#9a917e','center')}
+  else{hideIn(netUrlIn);hideIn(netPwIn);txt('已連線：'+NET.url,B.x+20,B.y+84,'600 12px '+SANS,'#8fe39a');txt('線上 '+(NET.peers.size+1)+' 人'+(NET.party?'　隊伍 '+NET.party.mem.length+' 人':''),B.x+20,B.y+106,'600 12px '+SANS,'#e9e2d0');
+    txt(NET.cloud?'雲端存檔：'+new Date(NET.cloud.t).toLocaleString()+'（Lv'+NET.cloud.lv+'）':'雲端還沒有存檔',B.x+20,B.y+128,'500 11px '+SANS,'#b9ae98');
+    [['up','上傳存檔'],['down','載入雲端存檔'],['off','離線']].forEach(([k,n],i)=>{const b={x:B.x+20+i*165,y:B.y+156,w:150,h:32,k};uiRects.np.push(b);ctx.fillStyle=inRect(b,mouse.sx,mouse.sy)?'#4a4030':'#2a241b';ctx.fillRect(b.x,b.y,b.w,b.h);txt(n,b.x+75,b.y+21,'800 12px '+SANS,k==='off'?'#e0645a':'#fff4dc','center')})}
+  txt('Esc 關閉',B.x+B.w-20,B.y+B.h-14,'500 11px '+SANS,'#9a917e','right')}
+function updateNetPanel(){if(pressed.esc){netOpen=false;hideIn(netUrlIn);hideIn(netPwIn);return}if(!mouse.just)return;const r=(uiRects.np||[]).find(r=>inRect(r,mouse.sx,mouse.sy));if(!r){if(!inRect(NETP,mouse.sx,mouse.sy)){netOpen=false;hideIn(netUrlIn);hideIn(netPwIn)}return}
+  sfx('ui');if(r.k==='go')netConnect();else if(r.k==='off')netClose();else if(r.k==='up'){try{saveGame();const s=localStorage.getItem(SLOT+P.name);if(s)netSend({t:'save',data:s,lv:P.lv});log('線上：已上傳存檔','#7fd0ff')}catch(_){}}else if(r.k==='down')netSend({t:'load'})}
+
+try{const nb=document.getElementById('netbtn');nb&&nb.addEventListener&&nb.addEventListener('click',e=>{try{e.currentTarget.blur()}catch(_){}if(S==='play'||S==='dead'){netOpen=!netOpen;if(!netOpen){hideIn(netUrlIn);hideIn(netPwIn)}}else log('請先選擇或建立角色，再進入線上模式','#9a917e')})}catch(_){}
 const cv=document.getElementById('game');let ctx=cv.getContext('2d');const mainCtx=ctx;
 const UIS=(()=>{try{const v=+localStorage.getItem('rpgui');if(v>=.6&&v<=1)return v}catch(_){}return .8})();let W=960/UIS,H=540/UIS;const W0=960,H0=540,TW=64,TH=32,MW=64,MH=64,MF=MW/48,SC=v=>Math.round(v*MF),MMK=192/(MW+MH);
 const DIFF=[{name:'輕鬆',hero:6,atk:-2,dmg:.6,cd:1.5,desc:'生命 ×6，敵人命中 -2，傷害 ×0.6'},{name:'標準',hero:3.3,atk:-1,dmg:.9,cd:1.15,desc:'生命 ×3.3，敵人命中 -1，傷害 ×0.9'},{name:'困難',hero:2.6,atk:1,dmg:1.15,cd:.9,desc:'生命 ×2.6，敵人命中 +1，傷害 ×1.15，攻擊更頻繁'}];
@@ -2966,7 +3058,7 @@ function step(){
   if(talOpen){updateTal();clearInput();return}
   if(pressed.gem){gemNew=false;gemOpen=!gemOpen;mercOpen=false;talOpen=false;invOpen=false;sfx('ui');pressed.gem=false}if(pressed.merc){mercOpen=!mercOpen;gemOpen=false;talOpen=false;invOpen=false;sfx('ui');pressed.merc=false}
   if(pressed.rune){runeOpen=!runeOpen;gemOpen=false;mercOpen=false;sfx('ui');pressed.rune=false}if(pressed.chal){chOpen=!chOpen;gemOpen=false;mercOpen=false;runeOpen=false;sfx('ui');pressed.chal=false}
-  if(pressed.stash){stashOpen=!stashOpen;sfx('ui');pressed.stash=false}if(pressed.pets){petOpen=!petOpen;sfx('ui');pressed.pets=false}if(pressed.cfg){cfgOpen=!cfgOpen;sfx('ui');pressed.cfg=false}if(cfgOpen){updateCfg();clearInput();return}if(stashOpen){updateStash();clearInput();return}if(petOpen){updatePets();clearInput();return}if(campOpen){updateCamp();clearInput();return}if(mtalOpen){updateMTal();clearInput();return}
+  if(pressed.stash){stashOpen=!stashOpen;sfx('ui');pressed.stash=false}if(pressed.pets){petOpen=!petOpen;sfx('ui');pressed.pets=false}if(pressed.cfg){cfgOpen=!cfgOpen;sfx('ui');pressed.cfg=false}if(cfgOpen){updateCfg();clearInput();return}if(stashOpen){updateStash();clearInput();return}if(petOpen){updatePets();clearInput();return}if(campOpen){updateCamp();clearInput();return}if(netOpen){updateNetPanel();clearInput();return}if(mtalOpen){updateMTal();clearInput();return}
   if(pressed.codex){codexOpen=!codexOpen;runeOpen=false;gemOpen=false;sfx('ui');pressed.codex=false}if(codexOpen){updateCodex();clearInput();return}
   if(runeOpen){updateRunes();clearInput();return}
   if(chOpen){updateCh();clearInput();return}
@@ -2990,13 +3082,14 @@ function step(){
   if(mouse.just&&uiRects.townBtn&&inRect(uiRects.townBtn,mouse.sx,mouse.sy)){townPortal(false);clearInput();return}
   if(mouse.just&&tipCur&&uiRects.tip&&inRect(uiRects.tip,mouse.sx,mouse.sy)){tipCur.t=1;clearInput();return}
   if(mouse.just&&uiRects.talBtn&&inRect(uiRects.talBtn,mouse.sx,mouse.sy)){talOpen=true;sfx('ui');clearInput();return}
+  if(netClick()){clearInput();return}
   if(mouse.just&&uiRects.pf&&!invOpen){const r=uiRects.pf.find(r=>inRect(r,mouse.sx,mouse.sy));if(r){if(r.k==='inv')invOpen=true;else if(r.k==='merc')mercOpen=true;else petOpen=true;sfx('ui');clearInput();return}}
   if(mouse.just&&uiRects.xb){const r=uiRects.xb.find(r=>inRect(r,mouse.sx,mouse.sy));if(r){if(r.k==='quest')qOpen=true;else if(r.k==='gem'){gemOpen=true;gemNew=false}else if(r.k==='merc')mercOpen=true;else if(r.k==='rune')runeOpen=true;else if(r.k==='chal')chOpen=true;else if(r.k==='codex')codexOpen=true;else if(r.k==='stash')stashOpen=true;else if(r.k==='pets')petOpen=true;else if(r.k==='cfg')cfgOpen=true;else advOpen=true;sfx('ui');clearInput();return}}
   if(mouse.just&&mouse.sy>H-64)mouse.just=false;
   stats.time++;pathBudget=3;if(frame%4===0)reveal();
   if(aiOn){mouse.down=false;mouse.rdown=false;mouse.rjust=false;mouse.just=false;for(const k of ['q','w','e','r','i1','i2','i3','i4'])delete pressed[k];aiTick()}
   findHover();
-  townTick();updatePlayer();lpTick();mercTick();tipTick();hazTick();achTick();petTick();buffAura();for(const e of enemies)updateEnemy(e);separate();updateProjs();updateFx();respawnTick();updateEvents();riftTick();trialTick();
+  townTick();netTick();updatePlayer();lpTick();mercTick();tipTick();hazTick();achTick();petTick();buffAura();for(const e of enemies)updateEnemy(e);separate();updateProjs();updateFx();respawnTick();updateEvents();riftTick();trialTick();
   enemies=enemies.filter(e=>!(e.dead&&e.deathT>900));
   if(areaT>0)areaT--;
   if(++saveT>=1800){saveT=0;saveGame()}
@@ -3919,10 +4012,10 @@ function drawWorld(){
   const list=[];
   for(const o of objs){const sx=sxOf(o.i+.5,o.j+.5),sy=syOf(o.i+.5,o.j+.5);if(sx<-80||sx>W+80||sy<-20||sy>H+140)continue;if(explored&&!explored[o.j*MW+o.i]){let nb=false;for(const [dx,dy] of DIRS){const a=o.i+dx,b=o.j+dy;if(a>=0&&b>=0&&a<MW&&b<MH&&explored[b*MW+a]){nb=true;break}}if(!nb)continue}list.push([o.i+o.j+1,0,o,sx,sy])}
   for(const e of enemies){if(e.dead||!seen(e.x,e.y))continue;const sx=sxOf(e.x,e.y),sy=syOf(e.x,e.y);if(sx<-80||sx>W+80||sy<-40||sy>H+200)continue;list.push([e.x+e.y,1,e])}
-  list.push([P.x+P.y,2,P]);if(merchant)list.push([merchant.x+merchant.y,4,merchant]);if(smith)list.push([smith.x+smith.y,7,smith]);for(const o of shrines)if(seen(o.x,o.y))list.push([o.x+o.y,5,o]);for(const ev of evs)if(seen(ev.x,ev.y))list.push([ev.x+ev.y,6,ev]);if(merc)list.push([merc.x+merc.y,8,merc]);if(petE)list.push([petE.x+petE.y,9,petE]);for(const n of townNPC)list.push([n.x+n.y,10,n]);
+  list.push([P.x+P.y,2,P]);if(merchant)list.push([merchant.x+merchant.y,4,merchant]);if(smith)list.push([smith.x+smith.y,7,smith]);for(const o of shrines)if(seen(o.x,o.y))list.push([o.x+o.y,5,o]);for(const ev of evs)if(seen(ev.x,ev.y))list.push([ev.x+ev.y,6,ev]);if(merc)list.push([merc.x+merc.y,8,merc]);if(petE)list.push([petE.x+petE.y,9,petE]);for(const n of townNPC)list.push([n.x+n.y,10,n]);if(NET.on&&isTown()){const rm=netRoom();for(const q of NET.peers.values())if(q.room===rm)list.push([q.rx+q.ry,11,q])}
   for(const pr of projs)list.push([pr.x+pr.y,3,pr]);
   list.sort((a,b)=>a[0]-b[0]);
-  for(const it of list){if(it[1]===0){if(R3on)objLight3D(it[2],it[3],it[4]);else drawObj(it[2],it[3],it[4])}else if(it[1]===1)drawEnemy(it[2]);else if(it[1]===2)drawHero(sxOf(P.x,P.y),syOf(P.x,P.y));else if(it[1]===4)drawMerchant();else if(it[1]===5)drawShrine(it[2]);else if(it[1]===6)drawEvent(it[2]);else if(it[1]===7)drawSmith();else if(it[1]===8)drawMerc();else if(it[1]===9)drawPet();else if(it[1]===10)drawNPC(it[2]);else drawProj(it[2])}drawLPfx();
+  for(const it of list){if(it[1]===0){if(R3on)objLight3D(it[2],it[3],it[4]);else drawObj(it[2],it[3],it[4])}else if(it[1]===1)drawEnemy(it[2]);else if(it[1]===2)drawHero(sxOf(P.x,P.y),syOf(P.x,P.y));else if(it[1]===4)drawMerchant();else if(it[1]===5)drawShrine(it[2]);else if(it[1]===6)drawEvent(it[2]);else if(it[1]===7)drawSmith();else if(it[1]===8)drawMerc();else if(it[1]===9)drawPet();else if(it[1]===10)drawNPC(it[2]);else if(it[1]===11)drawPeer(it[2]);else drawProj(it[2])}drawLPfx();
   {const gl=[];for(const p of parts){if(p.glow){gl.push(p);continue}ctx.globalAlpha=clamp(p.life/p.max,0,1);ctx.fillStyle=p.col;ctx.fillRect(sxOf(p.x,p.y)-p.s/2,syOf(p.x,p.y)-p.z-p.s/2,p.s,p.s)}
     ctx.globalCompositeOperation='lighter';for(const p of gl){const a=clamp(p.life/p.max,0,1),x=sxOf(p.x,p.y),y=syOf(p.x,p.y)-p.z;ctx.globalAlpha=a*.35;ctx.fillStyle=p.col;ctx.fillRect(x-p.s,y-p.s,p.s*2,p.s*2);ctx.globalAlpha=a;ctx.fillRect(x-p.s/2,y-p.s/2,p.s,p.s)}
     ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;for(const f of effects)drawEffectTop(f)}
@@ -3954,7 +4047,7 @@ function drawLighting(px,py){if(isArena()){const tt=enemies.find(e=>e.titan&&!e.
 
 /* ================= drawing: hud ================= */
 function txt(s,x,y,font,col,align,stroke){ctx.font=font;ctx.textAlign=align||'left';if(stroke){ctx.lineWidth=stroke;ctx.strokeStyle='rgba(0,0,0,.9)';ctx.lineJoin='round';ctx.strokeText(s,x,y)}ctx.fillStyle=col;ctx.fillText(s,x,y)}
-function drawLabels(){drawNPCLabels();for(const e of enemies){if(!e.say||e.dead)continue;const sx=sxOf(e.x,e.y),sy=syOf(e.x,e.y)-e.d.h*1.1*ZK-20;ctx.font='700 13px '+SANS;const w=ctx.measureText(e.say.txt).width+20;ctx.fillStyle='rgba(20,10,8,.85)';ctx.fillRect(sx-w/2,sy-22,w,28);ctx.strokeStyle='#ff8a6a';ctx.strokeRect(sx-w/2+.5,sy-21.5,w-1,27);txt(e.say.txt,sx,sy-3,'700 13px '+SANS,'#ffd8c8','center')}
+function drawLabels(){drawNPCLabels();drawPeerLabels();for(const e of enemies){if(!e.say||e.dead)continue;const sx=sxOf(e.x,e.y),sy=syOf(e.x,e.y)-e.d.h*1.1*ZK-20;ctx.font='700 13px '+SANS;const w=ctx.measureText(e.say.txt).width+20;ctx.fillStyle='rgba(20,10,8,.85)';ctx.fillRect(sx-w/2,sy-22,w,28);ctx.strokeStyle='#ff8a6a';ctx.strokeRect(sx-w/2+.5,sy-21.5,w-1,27);txt(e.say.txt,sx,sy-3,'700 13px '+SANS,'#ffd8c8','center')}
   labelRects=[];const placed=[],all=!!keys.alt;
   const LD=drops.filter(d=>{if(d.kind==='pet')return seen(d.x,d.y)&&!d.taken;if(d.kind==='hporb'||d.kind==='mporb'||d.taken||!seen(d.x,d.y))return false;if(all)return true;if(d.kind==='gold'||d.kind==='pot')return false;if(d.kind==='gem')return d.lv>=3;if(d.kind==='pet')return true;return d.it.rar>=1||d.it.setId||Math.hypot(d.x-P.x,d.y-P.y)<2.2}).sort((a,b)=>(b.kind==='item'?b.it.rar+(b.it.setId?3:0):0)-(a.kind==='item'?a.it.rar+(a.it.setId?3:0):0)||Math.hypot(a.x-P.x,a.y-P.y)-Math.hypot(b.x-P.x,b.y-P.y)).slice(0,all?40:12);
   for(const d of LD){const sx=sxOf(d.x,d.y);let sy=syOf(d.x,d.y)-20*ZK;
@@ -4109,7 +4202,7 @@ function drawHUD(){
     if(boss&&!boss.dead&&seen(boss.x,boss.y)){const [a,b]=mp(boss.x,boss.y);ctx.strokeStyle='#e8c55a';ctx.lineWidth=1;ctx.strokeRect(a-3.5,b-3.5,7,7)}
     const [a,b]=mp(P.x,P.y);ctx.fillStyle='#ffffff';ctx.fillRect(a-2,b-2,4,4)}
   if(areaT>0){const a=Math.min(1,areaT/40,(280-areaT)/30);ctx.globalAlpha=a;txt(rift?'無盡試煉':LV().ch+'　'+level+'-'+stage+(cycle?'・輪迴 '+cycle:''),W/2,190,'500 15px '+SANS,'#c9a24b','center',4);if(isArena()){txt('試煉場',W/2,236,'900 44px '+SERIF,'#ff8a5a','center',5);txt('— '+TITAN[(level-1)%TITAN.length]+' 降臨 —',W/2,272,'700 18px '+SERIF,'#ffd36b','center',4)}else txt(rift?'第 '+rift.floor+' 層':LV().name,W/2,236,'900 44px '+SERIF,'#e9e2d0','center',5);ctx.globalAlpha=1}
-  drawBuffBar();drawParty();drawAIBadge();
+  drawBuffBar();drawParty();drawNetHud();drawAIBadge();
   if(victoryT>0){const a=Math.min(1,victoryT/60,(600-victoryT)/30);ctx.globalAlpha=a;ctx.fillStyle='rgba(10,8,6,.75)';ctx.fillRect(0,170,W,92);
     txt((boss?(boss.d.guard?'關卡守衛':boss.d.name):'首領')+'已被擊敗',W/2,210,'900 32px '+SERIF,'#f0a040','center');
     const sec=stats.time/60;txt('用時 '+Math.floor(sec/60)+' 分 '+Math.floor(sec%60)+' 秒・擊殺 '+stats.kills+'・重擊 '+stats.crits+' 次・撿完戰利品後點擊傳送門',W/2,240,'500 13px '+SANS,'#e9e2d0','center');ctx.globalAlpha=1}
@@ -4275,7 +4368,7 @@ function draw(){
   uiCtx.setTransform(1,0,0,1,0,0);uiCtx.clearRect(0,0,uiCv.width,uiCv.height);{const k2=uiCv.width/W;uiCtx.setTransform(k2,0,0,k2,0,0)}
   try{drawFrame()}finally{ctx=mainCtx}
 }
-function drawFrame(){if(S!=='create'&&nameIn.style.display!=='none')nameIn.style.display='none';
+function drawFrame(){if(S!=='create'&&nameIn.style.display!=='none')nameIn.style.display='none';if(!netOpen){hideIn(netUrlIn);hideIn(netPwIn)}if(S!=='play')hideIn(chatIn);
   if(S==='title'||S==='create'){ZK=1;W=W0;H=H0;if(!tile){genMap();}
     if(!P||S==='title'){ctx.fillStyle='#08070a';ctx.fillRect(0,0,W,H);camX=(4.5-4.5)*TW/2;camY=9*TH/2;blitGround();}
     else{ctx.fillStyle='#08070a';ctx.fillRect(0,0,W,H);camX=0;camY=9*TH/2;blitGround()}
@@ -4288,7 +4381,7 @@ function drawFrame(){if(S!=='create'&&nameIn.style.display!=='none')nameIn.style
   ctx=uiCtx;drawWeather();ctx.save();ctx.translate(shx,shy);if(!invOpen)drawLabels();ctx.restore();
   if(ultAfter&&!ultFX)drawUltAfter();
   drawHUD();
-  if(invOpen)drawInventory();if(talOpen)drawTal();if(qOpen)drawQuest();if(gemOpen)drawGems();if(mercOpen)drawMercUI();if(runeOpen)drawRunes();if(codexOpen)drawCodex();if(stashOpen)drawStash();if(petOpen)drawPets();if(campOpen)drawCamp();if(mtalOpen)drawMTal();if(cfgOpen)drawCfg();if(chOpen)drawCh();if(riftOpen)drawRiftUI();if(advOpen)drawAdv();
+  if(invOpen)drawInventory();if(talOpen)drawTal();if(qOpen)drawQuest();if(gemOpen)drawGems();if(mercOpen)drawMercUI();if(runeOpen)drawRunes();if(codexOpen)drawCodex();if(stashOpen)drawStash();if(petOpen)drawPets();if(campOpen)drawCamp();if(netOpen)drawNetPanel();if(mtalOpen)drawMTal();if(cfgOpen)drawCfg();if(chOpen)drawCh();if(riftOpen)drawRiftUI();if(advOpen)drawAdv();
   {const tt=enemies.find(e=>e.titan&&!e.dead&&e.hideT>0);if(tt){const k=tt.hideT/tt.hideM,pu=.5+.5*Math.sin(frame*.3);const g=ctx.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,H*.8);g.addColorStop(0,'rgba(255,0,0,0)');g.addColorStop(1,'rgba(255,30,10,'+(.25+.25*pu)*(1-k*.5)+')');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);txt('滅世光束蓄力中——躲到石柱後面！ '+(tt.hideT/60).toFixed(1),W/2,140,'900 24px '+SERIF,'#ff5a3a','center',5);const safe=!los(tt,P);txt(safe?'✔ 你在石柱的掩護中':'✘ 你暴露在光束範圍內',W/2,168,'800 14px '+SANS,safe?'#8fe39a':'#ff8a6a','center',4)}}
   drawTip();drawAchToast();if(clearInfo)drawClear();if(story)drawStory();
   if(ultFX)drawUltFX();
