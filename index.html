@@ -61,7 +61,7 @@ canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;touch-action:none;
 .info{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px 32px;font-size:14px}
 .info h2{font-size:12px;letter-spacing:.16em;color:var(--mute);font-weight:500;margin:0 0 8px}
 .info dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
-.info dt{white-space:nowrap}
+.info dt{white-space:nowrap}.info section{min-width:0}.info dl{grid-template-columns:minmax(0,max-content) minmax(0,1fr)}.info dt{white-space:normal;max-width:9.5em;overflow-wrap:break-word}.info dd{min-width:0;overflow-wrap:anywhere}.info>section:first-child{grid-column:1/-1}@media(min-width:760px){.info>section:first-child dl{grid-template-columns:minmax(0,max-content) minmax(0,1fr) minmax(0,max-content) minmax(0,1fr);column-gap:18px}}.info dl{row-gap:8px}
 .info dd{margin:0;color:var(--mute)}
 .info dd b{color:var(--gold);font-weight:500;font-variant-numeric:tabular-nums}
 .info p{margin:10px 0 0;color:var(--mute);font-size:13px}
