@@ -10,7 +10,7 @@ const clean=s=>String(s||'').replace(/[<>"'`\\\u0000-\u001f]/g,'').trim();
 const players=new Map();let nextId=1;const parties=new Map();let nextParty=1;
 function send(p,o){try{if(p.ws.readyState===1)p.ws.send(JSON.stringify(o))}catch(_){}}
 function room(p){return p.room}
-function pub(p){return{id:p.id,name:p.name,cls:p.cls,lv:p.lv,ch:p.ch,look:p.look,x:p.x,y:p.y,d:p.d,st:p.st,room:p.room,party:p.party||0}}
+function pub(p){return{id:p.id,name:p.name,cls:p.cls,lv:p.lv,ch:p.ch,look:p.look,x:p.x,y:p.y,d:p.d,st:p.st,room:p.room,party:p.party||0,hp:p.hp==null?1:p.hp}}
 function bcast(o,filter){const s=JSON.stringify(o);for(const q of players.values())if(q.ok&&(!filter||filter(q)))try{if(q.ws.readyState===1)q.ws.send(s)}catch(_){}}
 function partyInfo(pid){const P=parties.get(pid);if(!P)return null;return{id:pid,leader:P.leader,mem:P.mem.map(id=>{const q=players.get(id);return q?{id,name:q.name,cls:q.cls,lv:q.lv,ch:q.ch,hp:q.hp||1}:null}).filter(Boolean)}}
 function partySync(pid){const info=partyInfo(pid);if(!info)return;for(const id of info.mem.map(m=>m.id)){const q=players.get(id);if(q)send(q,{t:'party',a:'info',party:info})}bcast({t:'pp',ids:info.mem.map(m=>m.id),party:pid})}
@@ -19,6 +19,8 @@ const srv=http.createServer((req,res)=>{res.writeHead(200,{'content-type':'text/
 const wss=new WebSocketServer({server:srv,maxPayload:MAXSAVE+20000});
 wss.on('connection',(ws,req)=>{const p={id:nextId++,ws,ok:false,room:'',x:0,y:0,d:6,st:'idle',rate:[],lastPos:0};players.set(p.id,p);
   ws.on('message',raw=>{let m;try{m=JSON.parse(raw)}catch(_){return}if(!m||typeof m.t!=='string')return;
+    if(m.t==='g'){if(!p.ok||!p.party||raw.length>48000)return;const t=Date.now();if(t-(p.gw||0)>1000){p.gw=t;p.gn=0}if(++p.gn>80)return;const o={t:'g',from:p.id,m:m.m};
+      if(m.to){const q=players.get(+m.to);if(q&&q.party===p.party)send(q,o)}else bcast(o,q=>q!==p&&q.party===p.party&&q.room===p.room);return}
     const now=Date.now();if(m.t!=='pos'){p.rate=p.rate.filter(t=>now-t<10000);p.rate.push(now);if(p.rate.length>40)return}
     if(m.t==='hello'){const name=clean(m.name).slice(0,12),pw=String(m.pw||'');if(!name||pw.length<3){send(p,{t:'err',m:'名稱或密碼不正確（密碼至少 3 個字）'});return}
       for(const q of players.values())if(q.ok&&q.name===name&&q!==p){send(p,{t:'err',m:'這個角色已經在線上'});return}
@@ -29,7 +31,7 @@ wss.on('connection',(ws,req)=>{const p={id:nextId++,ws,ok:false,room:'',x:0,y:0,
     if(!p.ok)return;
     if(m.t==='pos'){if(now-p.lastPos<60&&(m.room==null||m.room===p.room))return;p.lastPos=now;p.x=+m.x||0;p.y=+m.y||0;p.d=(m.d|0)&7;p.st=clean(m.st).slice(0,8);if(m.hp!=null)p.hp=+m.hp;
       if(m.room!=null&&m.room!==p.room){p.room=clean(m.room).slice(0,30);bcast({t:'room',id:p.id,room:p.room,x:p.x,y:p.y},q=>q!==p)}
-      const o={t:'pos',id:p.id,x:p.x,y:p.y,d:p.d,st:p.st};bcast(o,q=>q!==p&&q.room===p.room);return}
+      const o={t:'pos',id:p.id,x:p.x,y:p.y,d:p.d,st:p.st,hp:p.hp};bcast(o,q=>q!==p&&q.room===p.room);return}
     if(m.t==='info'){p.lv=+m.lv||p.lv;p.ch=+m.ch||p.ch;p.cls=clean(m.cls).slice(0,10)||p.cls;if(m.look)p.look=clean(m.look).slice(0,400);bcast({t:'upd',p:pub(p)},q=>q!==p);if(p.party)partySync(p.party);return}
     if(m.t==='chat'){const txt=clean(m.m).slice(0,120);if(!txt)return;const ch=m.ch==='p'&&p.party?'p':m.ch==='r'?'r':'w';
       const o={t:'chat',ch,from:p.name,fid:p.id,m:txt};if(ch==='p')bcast(o,q=>q.party===p.party);else if(ch==='r')bcast(o,q=>q.room===p.room);else bcast(o);return}
